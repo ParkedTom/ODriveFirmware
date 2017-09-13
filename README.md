@@ -15,8 +15,10 @@ There is also [ODriveFPGA](https://github.com/madcowswe/ODriveFPGA), which conta
 
 - [Configuring parameters](#configuring-parameters)
 - [Compiling and downloading firmware](#compiling-and-downloading-firmware)
+- [Communicating over USB](#communicating-over-usb)
 - [Generating startup code](#generating-startup-code)
 - [Setting up Eclipse development environment](#setting-up-eclipse-development-environment)
+- [Notes for Contributors](#notes-for-contributors)
 
 <!-- /MarkdownTOC -->
 
@@ -53,6 +55,10 @@ An upcoming feature will enable automatic tuning. Until then, here is a rough tu
 * Back down `pos_gain` until you do not have overshoot anymore.
 * The integrator is not easily tuned, nor is it strictly required. Tune at your own discression.
 
+### Optional parameters
+By default both motors are enabled, and the default control mode is position control.
+If you want a different mode, you can change `.control_mode`. To disable a motor, set `.enable_control` and `.do_calibration` to false.
+
 ## Compiling and downloading firmware
 
 ### Getting a programmer
@@ -77,7 +83,6 @@ Install the following:
 * [GNU ARM Embedded Toolchain](https://developer.arm.com/open-source/gnu-toolchain/gnu-rm/downloads). The cross-compiler used to compile the code. Download and install the "Windows 32-bit" version. Make sure to tick the "add to path" option.
 * [Make for Windows](http://gnuwin32.sourceforge.net/packages/make.htm). Make is used to script the compilation process. Download and run the complete package setup program. Add the path of the binaries to your PATH environment variable. For me this was at `C:\Program Files (x86)\GnuWin32\bin`.
 * OpenOCD. Follow the instructions at [GNU ARM Eclipse  - How to install the OpenOCD binaries](http://gnuarmeclipse.github.io/openocd/install/), including the part about ST-LINK/V2 drivers. Add the path of the binaries to your PATH environment variable. For me this was at `C:\Program Files\GNU ARM Eclipse\OpenOCD\0.10.0-201704182147-dev\bin`.
-* You may need to install the [STM32 Virtual COM Port Driver](https://my.st.com/content/my_st_com/en/products/development-tools/software-development-tools/stm32-software-development-tools/stm32-utilities/stsw-stm32102.license%3d1496877042981.html), but in many cases this is not required.
 
 After installing all of the above, open a Git Bash shell. Continue at section [Building the firmware](#building-the-firmware).
 
@@ -86,6 +91,9 @@ TODO
 
 ### Building the firmware
 * Make sure you have cloned the repository.
+  * For v3.3, you should use the [v3.3-pinout](https://github.com/madcowswe/ODriveFirmware/tree/v3.3-pinout) branch.
+  * For other versions you should use master
+  * In the near future this will be controlled with a preprocessor switch, but is done with branches for now.
 * Navigate your terminal (bash/cygwin) to the ODriveFirmware dir.
 * Run `make` in the root of this repository.
 
@@ -98,6 +106,70 @@ TODO
 ### Debugging the firmware
 Run `make gdb`. This will reset and halt at program start. Now you can set breakpoints and run the program. If you know how to use gdb, you are good to go.
 If you prefer to debug from eclipse, see [Setting up Eclipse development environment](#setting-up-eclipse-development-environment).
+
+## Communicating over USB
+There is currently a very primitive method to read/write configuration, commands and errors from the ODrive over the USB.
+Please use the `ODriveFirmware/tools/test_bulk.py` python script for this.
+On Windows you need to set the driver for ODrive to libusb using [Zadig](http://zadig.akeo.ie/).
+
+### Command set
+The most accurate way to understand the commands is to read [the code](https://github.com/madcowswe/ODriveFirmware/blob/f19f1b78de4bd917284ff95bc61ca616ca9bacc4/MotorControl/low_level.c#L353) that parses the commands.
+
+#### Motor Position command
+```
+p motor position velocity_ff current_ff
+```
+* `p` for position
+* `motor` is the motor number, `0` or `1`.
+* `position` is the desired position, in encoder counts.
+* `velocity_ff` is the velocity feed-forward term, in counts/s.
+* `current_ff` is the current feed-forward term, in A.
+
+Note that if you don't know what feed-forward is or what it's used for, simply set it to 0.
+
+#### Motor Velocity command
+```
+v motor velocity current_ff
+```
+* `v` for velocity
+* `motor` is the motor number, `0` or `1`.
+* `velocity` is the desired velocity in counts/s.
+* `current_ff` is the current feed-forward term, in A.
+
+Note that if you don't know what feed-forward is or what it's used for, simply set it to 0.
+
+#### Motor Current command
+```
+c motor current
+```
+* `c` for current
+* `motor` is the motor number, `0` or `1`.
+* `current` is the desired current in A.
+
+#### Variable getting and setting
+```
+g type index
+s type index value
+```
+* `g` for get, `s` for set
+* `type` is the data type as follows:
+** `0` is float
+** `1` is int
+** `2` is bool
+* `index` is the index in the corresponding [exposed variable table](https://github.com/madcowswe/ODriveFirmware/blob/f19f1b78de4bd917284ff95bc61ca616ca9bacc4/MotorControl/low_level.c#L184-L265).
+
+For example
+* `g 0 12` will return the phase resistance of M0
+* `s 0 8 10000.0` will set the velocity limit on M0 to 10000 counts/s
+* `g 1 3` will return the error status of M0
+* `g 1 7` will return the error status of M1
+
+The error status corresponds to the [Error_t enum in low_level.h](https://github.com/madcowswe/ODriveFirmware/blob/f19f1b78de4bd917284ff95bc61ca616ca9bacc4/MotorControl/low_level.h#L17-L35).
+
+Note that the links in this section are to a specific commits to make sure that the line numbers are accurate. That is, they don't link to the newest master, but to an old version. Please check the corresponding lines in the code you are using. This is especially important to get the correct indicies in the exposed variable tables, and the error enum values.
+
+#### Continous monitoring of variables
+You can set up variables in monitoring slots, and then have them (or a subset of them) repeatedly printed upon request. Please see the code for this.
 
 ## Generating startup code
 **Note:** You do not need to run this step to program the board. This is only required if you wish to update the auto generated code.
@@ -155,3 +227,11 @@ There is an excellent project called CubeMX2Makefile, originally from baoshi. Th
 * Eclipse should flash the board for you and the program should start halted on the first instruction in `Main`
 * Set beakpoints, step, hit Resume, etc.
 * Make some cool features! ;D
+
+## Notes for Contributors
+In general the project uses the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html), except that the default indendtation is 4 spaces, and that the 80 character limit is not very strictly enforced, merely encouraged.
+
+### Code maintenance notes
+The cortex M4F processor has hardware single precision float unit. However double precision operations are not accelerated, and hence should be avoided. The following regex is helpful for cleaning out double constants:
+find: `([-+]?[0-9]+\.[0-9]+(?:[eE][-+]?[0-9]+)?)([^f0-9e])`
+replace: `\1f\2`
